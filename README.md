@@ -1,3 +1,7 @@
+[![GoDoc](https://godoc.org/github.com/aryszka/tagstash?status.svg)](https://godoc.org/github.com/aryszka/tagstash)
+[![Go Report Card](https://goreportcard.com/badge/github.com/aryszka/tagstash)](https://goreportcard.com/report/github.com/aryszka/tagstash)
+[![Go Cover](https://gocover.io/_badge/github.com/aryszka/tagstash)](https://gocover.io/github.com/aryszka/tagstash)
+
 # Tagstash
 
 Tagstash is a library for tagging. It stores many-to-many associations between arbitrary values and tags, and
