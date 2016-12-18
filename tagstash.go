@@ -34,12 +34,40 @@ type Storage interface {
 	Delete(string) error
 }
 
-// Logger objects are used to log runtime diagnostic messages. They are used report errors on read operations,
-// when the read failed for individual items, but it was able to continue with others.
-type Logger interface {
+// StorageOptions are used by the default storage implementation.
+type StorageOptions struct {
+}
 
-	// Error outputs messages of error severity.
-	Error(a ...interface{})
+// CacheOptions are used by the default cache implementation.
+type CacheOptions struct {
+
+	// CacheSize defines the maximum memory usage of the cache. Defaults to 1G.
+	CacheSize int
+
+	// ExpectedValueSize provides a hint for the cache about the expected median size of the stored values.
+	//
+	// This option exists only for optimization, there is no good rule of thumb. Too high values will result
+	// in worse memory utilization, while too low values may affect the individual lookup performance.
+	// Generally, it is better to err for the smaller values.
+	ExpectedValueSize int
+}
+
+// Options are used to initialization tagstash.
+type Options struct {
+
+	// Custom storage implementation. By default, a builtin storage is used.
+	Storage Storage
+
+	// Custom cache implementation. By default, a builtin cache is used.
+	Cache Storage
+
+	// CacheOptions define options for the default persistent storage implementation when not replaced by a custom
+	// storage.
+	StorageOptions StorageOptions
+
+	// CacheOptions define options for the default cache implementation when not replaced by a custom
+	// cache.
+	CacheOptions CacheOptions
 }
 
 type entrySort struct {
@@ -51,7 +79,6 @@ type entrySort struct {
 // tags.
 type TagStash struct {
 	cache, storage Storage
-	logger         Logger
 }
 
 func (e *Entry) matchValue() int {
@@ -74,6 +101,22 @@ func (s entrySort) Less(i, j int) bool {
 	}
 
 	return left.requestTagCount > right.requestTagCount
+}
+
+// New creates and initializes a tagstash instance.
+func New(o Options) *TagStash {
+	if o.Storage == nil {
+		o.Storage = newStorage(o.StorageOptions)
+	}
+
+	if o.Cache == nil {
+		o.Cache = newCache(o.CacheOptions)
+	}
+
+	return &TagStash{
+		storage: o.Storage,
+		cache:   o.Cache,
+	}
 }
 
 func setRequestIndex(tags []string, e []*Entry) (notFound []string) {
@@ -121,22 +164,22 @@ func mapEntries(e []*Entry) []string {
 	return v
 }
 
-func (t *TagStash) getAll(tags []string) []*Entry {
+func (t *TagStash) getAll(tags []string) ([]*Entry, error) {
 	entries, err := t.cache.Get(tags)
 	if err != nil {
-		t.logger.Error("error while accessing cache", err)
+		return nil, err
 	}
 
 	notCached := setRequestIndex(tags, entries)
 
 	stored, err := t.storage.Get(notCached)
 	if err != nil {
-		t.logger.Error("error while accessing storage", err)
+		return nil, err
 	}
 
 	for _, e := range stored {
 		if err := t.cache.Set(e); err != nil {
-			t.logger.Error("error while caching entry", e.Value, e.Tag, err)
+			return nil, err
 		}
 	}
 
@@ -145,33 +188,41 @@ func (t *TagStash) getAll(tags []string) []*Entry {
 
 	entries = uniqueValues(entries)
 	sort.Sort(entrySort{tags, entries})
-	return entries
+	return entries, nil
 }
 
 // Get returns the best matching value for a set of tags. When there are overlapping tags and values, it
 // prioritizes first those values that match more tags from the arguments. When there are matches with the same
 // number of matching tags, it prioritizes those that whose tag order matches the closer the order of the tags
 // in the arguments. The tag order means the order of tags at the time of the definition (Set()).
-func (t *TagStash) Get(tags []string) (string, bool) {
-	entries := t.getAll(tags)
+func (t *TagStash) Get(tags ...string) (string, error) {
+	entries, err := t.getAll(tags)
+	if err != nil {
+		return "", err
+	}
+
 	if len(entries) == 0 {
-		return "", false
+		return "", nil
 	}
 
 	v := mapEntries(entries[:1])
-	return v[0], true
+	return v[0], nil
 }
 
 // GetAll returns all matches for a set of tags, sorted by the same rules that are used for prioritization when
 // calling Get().
-func (t *TagStash) GetAll(tags []string) []string {
-	entries := t.getAll(tags)
-	return mapEntries(entries)
+func (t *TagStash) GetAll(tags ...string) ([]string, error) {
+	entries, err := t.getAll(tags)
+	if err != nil {
+		return nil, err
+	}
+
+	return mapEntries(entries), nil
 }
 
 // Set stores tags associated with a value. The order of the tags is taken into account when there are
 // overlapping matches during retrieval.
-func (t *TagStash) Set(value string, tags []string) error {
+func (t *TagStash) Set(value string, tags ...string) error {
 	for i, ti := range tags {
 		e := &Entry{
 			Value:    value,
