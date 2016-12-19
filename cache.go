@@ -27,14 +27,14 @@ var (
 )
 
 func newCache(o CacheOptions) *cache {
-	if o.ExpectedValueSize < 64 {
-		o.ExpectedValueSize = 64
+	if o.ExpectedItemSize < 64 {
+		o.ExpectedItemSize = 64
 	}
 
 	return &cache{
 		forget: forget.New(forget.Options{
 			CacheSize: o.CacheSize,
-			ChunkSize: o.ExpectedValueSize,
+			ChunkSize: o.ExpectedItemSize,
 		}),
 		mx: &sync.Mutex{},
 	}
@@ -45,12 +45,12 @@ func readAll(r io.Reader, tag string) ([]*Entry, error) {
 	kvr := keyval.NewEntryReader(r)
 	for {
 		e, err := kvr.ReadEntry()
-		if err != nil && err != io.EOF {
-			return nil, err
-		}
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
 
-		if e == nil {
-			break
+			return nil, err
 		}
 
 		tagIndex, err := strconv.Atoi(e.Val)
@@ -67,10 +67,6 @@ func readAll(r io.Reader, tag string) ([]*Entry, error) {
 			Tag:      tag,
 			TagIndex: tagIndex,
 		})
-
-		if err == io.EOF {
-			break
-		}
 	}
 
 	return entries, nil
@@ -90,6 +86,32 @@ func writeAll(w io.Writer, e []*Entry) error {
 	}
 
 	return nil
+}
+
+func (c *cache) withTagEntries(tag string, op func([]*Entry) []*Entry) error {
+	c.mx.Lock()
+	defer c.mx.Unlock()
+
+	var entries []*Entry
+	if r, ok := c.forget.Get(tag); ok {
+		defer r.Close()
+
+		var err error
+		entries, err = readAll(r, tag)
+		if err != nil {
+			return err
+		}
+	}
+
+	entries = op(entries)
+
+	w, ok := c.forget.Set(tag, forEver)
+	if !ok {
+		return ErrFailedToCacheEntry
+	}
+
+	defer w.Close()
+	return writeAll(w, entries)
 }
 
 func (c *cache) Get(tags []string) ([]*Entry, error) {
@@ -113,44 +135,43 @@ func (c *cache) Get(tags []string) ([]*Entry, error) {
 }
 
 func (c *cache) Set(e *Entry) error {
-	c.mx.Lock()
-	defer c.mx.Unlock()
-
-	var (
-		entries []*Entry
-		exists  bool
-	)
-
-	if r, ok := c.forget.Get(e.Tag); ok {
-		defer r.Close()
-
-		var err error
-		entries, err = readAll(r, e.Tag)
-		if err != nil {
-			return err
+	return c.withTagEntries(e.Tag, func(entries []*Entry) []*Entry {
+		var exists bool
+		for _, ei := range entries {
+			if ei.Value == e.Value {
+				ei.TagIndex = e.TagIndex
+				exists = true
+				break
+			}
 		}
-	}
 
-	for _, ei := range entries {
-		if ei.Value == e.Value {
-			ei.TagIndex = e.TagIndex
-			exists = true
-			break
+		if !exists {
+			entries = append(entries, e)
 		}
-	}
 
-	if !exists {
-		entries = append(entries, e)
-	}
-
-	w, ok := c.forget.Set(e.Tag, forEver)
-	if !ok {
-		return ErrFailedToCacheEntry
-	}
-
-	defer w.Close()
-	return writeAll(w, entries)
+		return entries
+	})
 }
 
-func (c *cache) Remove(*Entry) error { return nil }
-func (c *cache) Delete(string) error { return nil }
+func (c *cache) Remove(e *Entry) error {
+	return c.withTagEntries(e.Tag, func(entries []*Entry) []*Entry {
+		for i, ei := range entries {
+			if ei.Value == e.Value {
+				last := len(entries) - 1
+				entries[last], entries = nil, append(entries[:i], entries[i+1:]...)
+				break
+			}
+		}
+
+		return entries
+	})
+}
+
+func (c *cache) Delete(tag string) error {
+	c.forget.Delete(tag)
+	return nil
+}
+
+func (c *cache) Close() {
+	c.forget.Close()
+}

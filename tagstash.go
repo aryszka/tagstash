@@ -1,6 +1,9 @@
 package tagstash
 
-import "sort"
+import (
+	"errors"
+	"sort"
+)
 
 // Entry represents a value-tag associaction.
 type Entry struct {
@@ -14,7 +17,12 @@ type Entry struct {
 	// TagIndex marks how strong strong a tag describes a value.
 	TagIndex int
 
-	requestTagCount, requestTagIndex int
+	requestTagMatch, requestIndexDelta int
+}
+
+// TagLookup when implemented by a storage, can return all tags associated with a value.
+type TagLookup interface {
+	GetTags(string) ([]string, error)
 }
 
 // Storage implementations store value-tag associations.
@@ -32,6 +40,9 @@ type Storage interface {
 
 	// Delete deletes all associations with the provided tag.
 	Delete(string) error
+
+	// Close releases any resources taken by the storage implementation.
+	Close()
 }
 
 // StorageOptions are used by the default storage implementation.
@@ -44,12 +55,12 @@ type CacheOptions struct {
 	// CacheSize defines the maximum memory usage of the cache. Defaults to 1G.
 	CacheSize int
 
-	// ExpectedValueSize provides a hint for the cache about the expected median size of the stored values.
+	// ExpectedItemSize provides a hint for the cache about the expected median size of the stored values.
 	//
 	// This option exists only for optimization, there is no good rule of thumb. Too high values will result
 	// in worse memory utilization, while too low values may affect the individual lookup performance.
 	// Generally, it is better to err for the smaller values.
-	ExpectedValueSize int
+	ExpectedItemSize int
 }
 
 // Options are used to initialization tagstash.
@@ -71,7 +82,6 @@ type Options struct {
 }
 
 type entrySort struct {
-	tags    []string
 	entries []*Entry
 }
 
@@ -81,14 +91,9 @@ type TagStash struct {
 	cache, storage Storage
 }
 
-func (e *Entry) matchValue() int {
-	v := e.requestTagIndex - e.TagIndex
-	if v < 0 {
-		return 0 - v
-	}
-
-	return v
-}
+// ErrNotSupported is returned when a feature is not supported by the current implementation. E.g. the storage
+// doesn't support lookup by value.
+var ErrNotSupported = errors.New("not supported")
 
 func (s entrySort) Len() int      { return len(s.entries) }
 func (s entrySort) Swap(i, j int) { s.entries[i], s.entries[j] = s.entries[j], s.entries[i] }
@@ -96,11 +101,11 @@ func (s entrySort) Swap(i, j int) { s.entries[i], s.entries[j] = s.entries[j], s
 func (s entrySort) Less(i, j int) bool {
 	left, right := s.entries[i], s.entries[j]
 
-	if left.requestTagCount == right.requestTagCount {
-		return left.matchValue() < right.matchValue()
+	if left.requestTagMatch == right.requestTagMatch {
+		return left.requestIndexDelta < right.requestIndexDelta
 	}
 
-	return left.requestTagCount > right.requestTagCount
+	return left.requestTagMatch > right.requestTagMatch
 }
 
 // New creates and initializes a tagstash instance.
@@ -124,7 +129,12 @@ func setRequestIndex(tags []string, e []*Entry) (notFound []string) {
 		var found bool
 		for _, ei := range e {
 			if ei.Tag == t {
-				ei.requestTagIndex = i
+				d := i - ei.TagIndex
+				if d < 0 {
+					d = 0 - d
+				}
+
+				ei.requestIndexDelta = d
 				found = true
 			}
 		}
@@ -142,12 +152,12 @@ func uniqueValues(e []*Entry) []*Entry {
 	u := make([]*Entry, 0, len(e))
 	for _, ei := range e {
 		if eim, ok := m[ei.Value]; ok {
-			eim.requestTagCount++
-			eim.requestTagIndex += ei.requestTagIndex
+			eim.requestTagMatch++
+			eim.requestIndexDelta += ei.requestIndexDelta
 			continue
 		}
 
-		ei.requestTagCount = 1
+		ei.requestTagMatch = 1
 		m[ei.Value] = ei
 		u = append(u, ei)
 	}
@@ -187,7 +197,7 @@ func (t *TagStash) getAll(tags []string) ([]*Entry, error) {
 	entries = append(entries, stored...)
 
 	entries = uniqueValues(entries)
-	sort.Sort(entrySort{tags, entries})
+	sort.Sort(entrySort{entries})
 	return entries, nil
 }
 
@@ -218,6 +228,20 @@ func (t *TagStash) GetAll(tags ...string) ([]string, error) {
 	}
 
 	return mapEntries(entries), nil
+}
+
+// GetTags returns the tags associated with the provided value or ErrNotSupported if the storage implementation
+// doesn't support this query.
+func (t *TagStash) GetTags(value string) ([]string, error) {
+	if tl, ok := t.cache.(TagLookup); ok {
+		return tl.GetTags(value)
+	}
+
+	if tl, ok := t.storage.(TagLookup); ok {
+		return tl.GetTags(value)
+	}
+
+	return nil, ErrNotSupported
 }
 
 // Set stores tags associated with a value. The order of the tags is taken into account when there are
@@ -268,4 +292,10 @@ func (t *TagStash) Delete(tag string) error {
 	}
 
 	return nil
+}
+
+// Close releases all resources.
+func (t *TagStash) Close() {
+	t.cache.Close()
+	t.storage.Close()
 }

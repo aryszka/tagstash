@@ -31,6 +31,12 @@ if u, err := stash.Get("foo", "qux", "wah"); err != nil {
 }
 ```
 
+### Installation
+
+```
+go get github.com/aryszka/tagstash
+```
+
 ### Documentation
 
 Find the godoc documentation here:
