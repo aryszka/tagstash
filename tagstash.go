@@ -107,17 +107,36 @@ type TagStash struct {
 // doesn't support lookup by value.
 var ErrNotSupported = errors.New("not supported")
 
-func (s entrySort) Len() int      { return len(s.entries) }
-func (s entrySort) Swap(i, j int) { s.entries[i], s.entries[j] = s.entries[j], s.entries[i] }
-
-func (s entrySort) Less(i, j int) bool {
-	left, right := s.entries[i], s.entries[j]
-
+func less(left, right *Entry) bool {
 	if left.requestTagMatch == right.requestTagMatch {
 		return left.requestIndexDelta < right.requestIndexDelta
 	}
 
 	return left.requestTagMatch > right.requestTagMatch
+}
+
+func (s entrySort) Len() int      { return len(s.entries) }
+func (s entrySort) Swap(i, j int) { s.entries[i], s.entries[j] = s.entries[j], s.entries[i] }
+
+func (s entrySort) Less(i, j int) bool {
+	left, right := s.entries[i], s.entries[j]
+	return less(left, right)
+}
+
+func (s entrySort) First() *Entry {
+	l := len(s.entries)
+	if l == 0 {
+		return nil
+	}
+
+	first := s.entries[0]
+	for _, e := range s.entries[1:] {
+		if less(e, first) {
+			first = e
+		}
+	}
+
+	return first
 }
 
 // New creates and initializes a tagstash instance.
@@ -182,7 +201,7 @@ func uniqueValues(e []*Entry) []*Entry {
 	return u
 }
 
-func mapEntries(e []*Entry) []string {
+func mapEntries(e ...*Entry) []string {
 	v := make([]string, 0, len(e))
 	for _, ei := range e {
 		v = append(v, ei.Value)
@@ -213,9 +232,7 @@ func (t *TagStash) getAll(tags []string) ([]*Entry, error) {
 	setRequestIndex(tags, stored)
 	entries = append(entries, stored...)
 
-	entries = uniqueValues(entries)
-	sort.Sort(entrySort{entries})
-	return entries, nil
+	return uniqueValues(entries), nil
 }
 
 // Get returns the best matching value for a set of tags. When there are overlapping tags and values, it
@@ -232,8 +249,8 @@ func (t *TagStash) Get(tags ...string) (string, error) {
 		return "", nil
 	}
 
-	v := mapEntries(entries[:1])
-	return v[0], nil
+	e := entrySort{entries}.First()
+	return mapEntries(e)[0], nil
 }
 
 // GetAll returns all matches for a set of tags, sorted by the same rules that are used for prioritization when
@@ -244,7 +261,8 @@ func (t *TagStash) GetAll(tags ...string) ([]string, error) {
 		return nil, err
 	}
 
-	return mapEntries(entries), nil
+	sort.Sort(entrySort{entries})
+	return mapEntries(entries...), nil
 }
 
 // GetTags returns the tags associated with the provided value or ErrNotSupported if the storage implementation
