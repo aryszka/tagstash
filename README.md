@@ -4,13 +4,13 @@
 
 # Tagstash
 
-Tagstash is a library for tagging. It stores many-to-many associations between arbitrary values and tags, and
-provides a best match lookup of values for multi-tag queries.
+Tagstash is a library for tag lookup.
 
 It is designed to decouple tagging from data. It typically stores URIs with one or more tag. The lookup
 operation accepts multiple tags, and tries to find the stored value that is the closest match for the provided
-set. Internally, it relies on a Postgresql based storage, extended with an in-memory cache. Both the persistent
-storage and the cache accept custom implementations.
+set. Internally, it relies on a PostgreSQL based storage, extended with an in-memory cache. Both the persistent
+storage and the cache accept custom implementations. For simple scenarios, or for prototyping, it supports
+Sqlite instead of PostgreSQL.
 
 ### Example:
 
@@ -39,6 +39,14 @@ if u, err := stash.Get("foo", "qux", "wah"); err != nil {
 
 ```
 go get github.com/aryszka/tagstash
+```
+
+If using the default Sqlite, the database with the default settings is automatically created. If using
+PostgreSQL, use the provided make task, create-postgres, to initialize the database, or run sql/create-db.sql to
+initialize it.
+
+```
+make PSQL_DB=foo PSQL_USER=$(whoami) create-postgres
 ```
 
 ### Documentation

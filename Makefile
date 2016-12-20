@@ -3,6 +3,9 @@
 SOURCES = $(shell find . -name '*.go')
 SQL_SOURCES = $(shell find . -name '*.sql')
 
+PSQL_USER ?= tagstash
+PSQL_DB ?= tagstash
+
 default: build
 
 gen: $(SQL_SOURCES)
@@ -13,6 +16,12 @@ build: gen $(SOURCES)
 
 install: $(SOURCES)
 	go install
+
+delete-postgres:
+	psql --user $(PSQL_USER) -d $(PSQL_DB) -f sql/delete-db.sql
+
+create-postgres:
+	psql --user $(PSQL_USER) -d $(PSQL_DB) -f sql/create-db.sql
 
 check: build
 	go test -race

@@ -47,7 +47,17 @@ type Storage interface {
 
 // StorageOptions are used by the default storage implementation.
 type StorageOptions struct {
-	DriverName     string
+
+	// DriverName specifies which data base driver to use. Currently supported: postgres, sqlite3. The
+	// default value is sqlite3.
+	DriverName string
+
+	// DataSourceName specifies the data source for the storage. In case of postgresql, it is the postgresql
+	// connection string, while in case of sqlite3, it is a path to a new or existing file. When not
+	// specified and the driver is sqlite3, ./data.sqlite will be used.
+	//
+	// When PostgreSQL is used, please refer to the driver implementation's documentation for configuration
+	// details: https://github.com/lib/pq.
 	DataSourceName string
 }
 
@@ -240,10 +250,6 @@ func (t *TagStash) GetAll(tags ...string) ([]string, error) {
 // GetTags returns the tags associated with the provided value or ErrNotSupported if the storage implementation
 // doesn't support this query.
 func (t *TagStash) GetTags(value string) ([]string, error) {
-	if tl, ok := t.cache.(TagLookup); ok {
-		return tl.GetTags(value)
-	}
-
 	if tl, ok := t.storage.(TagLookup); ok {
 		return tl.GetTags(value)
 	}
