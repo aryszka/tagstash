@@ -47,6 +47,8 @@ type Storage interface {
 
 // StorageOptions are used by the default storage implementation.
 type StorageOptions struct {
+	DriverName     string
+	DataSourceName string
 }
 
 // CacheOptions are used by the default cache implementation.
@@ -109,9 +111,14 @@ func (s entrySort) Less(i, j int) bool {
 }
 
 // New creates and initializes a tagstash instance.
-func New(o Options) *TagStash {
+func New(o Options) (*TagStash, error) {
 	if o.Storage == nil {
-		o.Storage = newStorage(o.StorageOptions)
+		s, err := newStorage(o.StorageOptions)
+		if err != nil {
+			return nil, err
+		}
+
+		o.Storage = s
 	}
 
 	if o.Cache == nil {
@@ -121,7 +128,7 @@ func New(o Options) *TagStash {
 	return &TagStash{
 		storage: o.Storage,
 		cache:   o.Cache,
-	}
+	}, nil
 }
 
 func setRequestIndex(tags []string, e []*Entry) (notFound []string) {

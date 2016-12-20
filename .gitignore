@@ -1,0 +1,3 @@
+cover.out
+test-data.sqlite
+sql/*.go

@@ -3,8 +3,12 @@ package tagstash
 import "errors"
 
 type mockStorage struct {
-	entries  []*Entry
-	failNext bool
+	entries                 []*Entry
+	failNext, failNextWrite bool
+}
+
+type mockStorageLookup struct {
+	*mockStorage
 }
 
 var errForgedError = errors.New("forged")
@@ -12,6 +16,19 @@ var errForgedError = errors.New("forged")
 func (s *mockStorage) fail() error {
 	if s.failNext {
 		s.failNext = false
+		return errForgedError
+	}
+
+	return nil
+}
+
+func (s *mockStorage) failWrite() error {
+	if err := s.fail(); err != nil {
+		return err
+	}
+
+	if s.failNextWrite {
+		s.failNextWrite = false
 		return errForgedError
 	}
 
@@ -35,8 +52,23 @@ func (s *mockStorage) Get(tags []string) ([]*Entry, error) {
 	return entries, nil
 }
 
-func (s *mockStorage) Set(e *Entry) error {
+func (s *mockStorageLookup) GetTags(value string) ([]string, error) {
 	if err := s.fail(); err != nil {
+		return nil, err
+	}
+
+	var tags []string
+	for _, e := range s.entries {
+		if e.Value == value {
+			tags = append(tags, e.Tag)
+		}
+	}
+
+	return tags, nil
+}
+
+func (s *mockStorage) Set(e *Entry) error {
+	if err := s.failWrite(); err != nil {
 		return err
 	}
 
@@ -52,7 +84,7 @@ func (s *mockStorage) Set(e *Entry) error {
 }
 
 func (s *mockStorage) Remove(e *Entry) error {
-	if err := s.fail(); err != nil {
+	if err := s.failWrite(); err != nil {
 		return err
 	}
 
@@ -68,7 +100,7 @@ func (s *mockStorage) Remove(e *Entry) error {
 }
 
 func (s *mockStorage) Delete(tag string) error {
-	if err := s.fail(); err != nil {
+	if err := s.failWrite(); err != nil {
 		return err
 	}
 
@@ -84,3 +116,40 @@ func (s *mockStorage) Delete(tag string) error {
 }
 
 func (s *mockStorage) Close() {}
+
+// func newTestStash() *TagStash {
+// 	return newTestStashWithCacheOptions(CacheOptions{
+// 		CacheSize: 1 << 12,
+// 	})
+// }
+//
+// func newTestStashLookup() *TagStash {
+// 	ts := newTestStash()
+// 	ts.storage = &mockStorageLookup{&mockStorage{}}
+// 	return ts
+// }
+//
+// func newTestStashLookupCache() *TagStash {
+// 	ts := newTestStashLookup()
+// 	ts.cache = &mockStorageLookup{&mockStorage{}}
+// 	return ts
+// }
+//
+// func newTestStashWithCacheOptions(co CacheOptions) *TagStash {
+// 	ts, err := New(Options{
+// 		Storage: &mockStorage{},
+// 		CacheOptions: co,
+// 	})
+//
+// 	if err != nil {
+// 		panic(err)
+// 	}
+//
+// 	return ts
+// }
+//
+// func newTestStashMockAll() *TagStash {
+// 	ts := newTestStash()
+// 	ts.cache = &mockStorage{}
+// 	return ts
+// }

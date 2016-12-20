@@ -2,16 +2,21 @@ package tagstash_test
 
 import (
 	"fmt"
+	"log"
 
 	"github.com/aryszka/tagstash"
 )
 
 func Example() {
-	stash := tagstash.New(tagstash.Options{
+	stash, err := tagstash.New(tagstash.Options{
 		CacheOptions: tagstash.CacheOptions{
 			CacheSize: 1 << 12,
 		},
 	})
+
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	stash.Set("https://www.example.org/page1.html", "foo", "bar", "baz")
 	stash.Set("https://www.example.org/page2.html", "foo", "qux", "quux")

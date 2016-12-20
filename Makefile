@@ -1,10 +1,14 @@
 .PHONY: cpu mem
 
 SOURCES = $(shell find . -name '*.go')
+SQL_SOURCES = $(shell find . -name '*.sql')
 
 default: build
 
-build: $(SOURCES)
+gen: $(SQL_SOURCES)
+	go generate
+
+build: gen $(SOURCES)
 	go build
 
 install: $(SOURCES)
@@ -13,8 +17,14 @@ install: $(SOURCES)
 check: build
 	go test -race
 
+check-pq: build
+	TEST_DB=postgres go test -race
+
 shortcheck: build
 	go test -test.short -run ^Test
+
+shortcheck-pq: build
+	TEST_DB=postgres go test -test.short -run ^Test
 
 bench: build
 	go test -cpuprofile cpu.out -memprofile mem.out -bench .
@@ -41,7 +51,7 @@ vet: $(SOURCES)
 	go vet
 
 check-cyclo: $(SOURCES)
-	gocyclo -over 9 .
+	gocyclo -over 12 .
 
 check-ineffassign: $(SOURCES)
 	ineffassign .
